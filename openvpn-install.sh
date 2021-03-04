@@ -606,7 +606,7 @@ function installQuestions () {
 }
 
 function installOpenVPN () {
-	if [[ $AUTO_INSTALL == "y" ]]; then
+  if [[ $AUTO_INSTALL == "y" ]]; then
 		# Set default choices so that no questions will be asked.
 		APPROVE_INSTALL=${APPROVE_INSTALL:-y}
 		APPROVE_IP=${APPROVE_IP:-y}
@@ -623,10 +623,47 @@ function installOpenVPN () {
 		# Behind NAT, we'll default to the publicly reachable IPv4.
 		PUBLIC_IPV4=$(curl ifconfig.co)
 		ENDPOINT=${ENDPOINT:-$PUBLIC_IPV4}
+
+		# extract additional information from env
 	fi
 
-	# Run setup questions first, and set other variales if auto-install
-	installQuestions
+  if [ $# -ge 0 ]; then
+    if [[ $1 = "y"]]; then
+       #Set default choices so that no questions will be asked.
+      APPROVE_INSTALL=${APPROVE_INSTALL:-y}
+      APPROVE_IP=${APPROVE_IP:-y}
+      IPV6_SUPPORT=${IPV6_SUPPORT:-n}
+      PORT_CHOICE=${PORT_CHOICE:-1}
+      PROTOCOL_CHOICE=${PROTOCOL_CHOICE:-1}
+      DNS=${DNS:-1}
+      COMPRESSION_ENABLED=${COMPRESSION_ENABLED:-n}
+      CUSTOMIZE_ENC=${CUSTOMIZE_ENC:-n}
+      CLIENT=${CLIENT:-client}
+      PASS=${PASS:-1}
+      CONTINUE=${CONTINUE:-y}
+
+      # Behind NAT, we'll default to the publicly reachable IPv4.
+      PUBLIC_IPV4=$(curl ifconfig.co)
+      ENDPOINT=${ENDPOINT:-$PUBLIC_IPV4}
+
+      PORT_CHOICE=2
+		  # extract additional information from env
+		  IP=$(printenv OPENVPN_SERVER_IP)
+		  proto_inst=$(printenv OPENVPN_SERVER_PROTO)
+		  if [ $proto_inst = "udp"]; then
+		    PROTOCOL_CHOICE=1
+		  else
+		    PROTOCOL_CHOICE=2
+      fi
+      VPN_SUBNET=$(printenv OPENVPN_SUBNET)
+
+    fi
+  else
+    # Run setup questions first, and set other variales if auto-install
+	  installQuestions
+  fi
+
+
 
 	# Get the "public" interface from the default route
 	NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
@@ -1280,5 +1317,9 @@ initialCheck
 if [[ -e /etc/openvpn/server.conf ]]; then
 	manageMenu
 else
-	installOpenVPN
+  if [ $# -ge 0 ]; then
+    if [[ $1 = "y"]]; then
+      installOpenVPN "y"
+    fi
+  fi
 fi
