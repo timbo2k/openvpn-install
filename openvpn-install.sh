@@ -628,7 +628,7 @@ function installOpenVPN () {
 	fi
 
   if [ $# -ge 0 ]; then
-    if [[ $1 = "y"]]; then
+    if [[ $1 = "y" ]]; then
        #Set default choices so that no questions will be asked.
       APPROVE_INSTALL=${APPROVE_INSTALL:-y}
       APPROVE_IP=${APPROVE_IP:-y}
@@ -649,13 +649,14 @@ function installOpenVPN () {
       PORT_CHOICE=2
 		  # extract additional information from env
 		  IP=$(printenv OPENVPN_SERVER_IP)
+		  PORT=$(printenv OPENVPN_SERVER_PORT)
 		  proto_inst=$(printenv OPENVPN_SERVER_PROTO)
 		  if [ $proto_inst = "udp"]; then
 		    PROTOCOL_CHOICE=1
 		  else
 		    PROTOCOL_CHOICE=2
       fi
-      VPN_SUBNET=$(printenv OPENVPN_SUBNET)
+      VPN_SUBNET=$(printenv OPENVPN_SERVER_SUBNET)
 
     fi
   else
