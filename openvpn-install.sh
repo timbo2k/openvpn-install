@@ -1319,7 +1319,7 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 	manageMenu
 else
   if [ $# -ge 0 ]; then
-    if [[ $1 = "y"]]; then
+    if [[ $1 = "y" ]]; then
       installOpenVPN "y"
     fi
   fi
