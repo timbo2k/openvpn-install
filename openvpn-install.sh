@@ -104,32 +104,32 @@ function installUnbound() {
 			apt-get install -y unbound
 
 			# Configuration
-			echo 'interface: $VPN_SUBNET.1
+			echo "interface: $VPN_SUBNET.1
 access-control: $VPN_SUBNET.1/24 allow
 hide-identity: yes
 hide-version: yes
 use-caps-for-id: yes
-prefetch: yes' >>/etc/unbound/unbound.conf
+prefetch: yes" >>/etc/unbound/unbound.conf
 
 		elif [[ "$OS" =~ (centos|amzn) ]]; then
 			yum install -y unbound
 
 			# Configuration
-			sed -i 's|# interface: 0.0.0.0$|interface: $VPN_SUBNET.1|' /etc/unbound/unbound.conf
-			sed -i 's|# access-control: 127.0.0.0/8 allow|access-control: $VPN_SUBNET.1/24 allow|' /etc/unbound/unbound.conf
-			sed -i 's|# hide-identity: no|hide-identity: yes|' /etc/unbound/unbound.conf
-			sed -i 's|# hide-version: no|hide-version: yes|' /etc/unbound/unbound.conf
-			sed -i 's|use-caps-for-id: no|use-caps-for-id: yes|' /etc/unbound/unbound.conf
+			sed -i "s|# interface: 0.0.0.0$|interface: $VPN_SUBNET.1|" /etc/unbound/unbound.conf
+			sed -i "s|# access-control: 127.0.0.0/8 allow|access-control: $VPN_SUBNET.1/24 allow|" /etc/unbound/unbound.conf
+			sed -i "s|# hide-identity: no|hide-identity: yes|" /etc/unbound/unbound.conf
+			sed -i "s|# hide-version: no|hide-version: yes|" /etc/unbound/unbound.conf
+			sed -i "s|use-caps-for-id: no|use-caps-for-id: yes|" /etc/unbound/unbound.conf
 
 		elif [[ "$OS" == "fedora" ]]; then
 			dnf install -y unbound
 
 			# Configuration
-			sed -i 's|# interface: 0.0.0.0$|interface: $VPN_SUBNET.1|' /etc/unbound/unbound.conf
-			sed -i 's|# access-control: 127.0.0.0/8 allow|access-control: $VPN_SUBNET.1/24 allow|' /etc/unbound/unbound.conf
-			sed -i 's|# hide-identity: no|hide-identity: yes|' /etc/unbound/unbound.conf
-			sed -i 's|# hide-version: no|hide-version: yes|' /etc/unbound/unbound.conf
-			sed -i 's|# use-caps-for-id: no|use-caps-for-id: yes|' /etc/unbound/unbound.conf
+			sed -i "s|# interface: 0.0.0.0$|interface: $VPN_SUBNET.1|" /etc/unbound/unbound.conf
+			sed -i "s|# access-control: 127.0.0.0/8 allow|access-control: $VPN_SUBNET.1/24 allow|" /etc/unbound/unbound.conf
+			sed -i "s|# hide-identity: no|hide-identity: yes|" /etc/unbound/unbound.conf
+			sed -i "s|# hide-version: no|hide-version: yes|" /etc/unbound/unbound.conf
+			sed -i "s|# use-caps-for-id: no|use-caps-for-id: yes|" /etc/unbound/unbound.conf
 
 		elif [[ "$OS" == "arch" ]]; then
 			pacman -Syu --noconfirm unbound
@@ -139,11 +139,11 @@ prefetch: yes' >>/etc/unbound/unbound.conf
 
 			mv /etc/unbound/unbound.conf /etc/unbound/unbound.conf.old
 
-			echo 'server:
+			echo "server:
 	use-syslog: yes
 	do-daemonize: no
-	username: "unbound"
-	directory: "/etc/unbound"
+	username: \"unbound\"
+	directory: \"/etc/unbound\"
 	trust-anchor-file: trusted-key.key
 	root-hints: root.hints
 	interface: $VPN_SUBNET.1
@@ -155,7 +155,7 @@ prefetch: yes' >>/etc/unbound/unbound.conf
 	hide-identity: yes
 	hide-version: yes
 	qname-minimisation: yes
-	prefetch: yes' >/etc/unbound/unbound.conf
+	prefetch: yes" >/etc/unbound/unbound.conf
 		fi
 
 		if [[ ! "$OS" =~ (fedora|centos|amzn) ]]; then
@@ -173,7 +173,7 @@ private-address: ::ffff:0:0/96" >>/etc/unbound/unbound.conf
 		echo 'include: /etc/unbound/openvpn.conf' >>/etc/unbound/unbound.conf
 
 		# Add Unbound 'server' for the OpenVPN subnet
-		echo 'server:
+		echo "server:
 interface: $VPN_SUBNET.1
 access-control: $VPN_SUBNET.1/24 allow
 hide-identity: yes
@@ -187,7 +187,7 @@ private-address: 169.254.0.0/16
 private-address: fd00::/8
 private-address: fe80::/10
 private-address: 127.0.0.0/8
-private-address: ::ffff:0:0/96' >/etc/unbound/openvpn.conf
+private-address: ::ffff:0:0/96" >/etc/unbound/openvpn.conf
 	fi
 
 	systemctl enable unbound
@@ -271,24 +271,22 @@ function installQuestions() {
 		read -rp "Do you want to define custom octets for your OpenVPN-Adressing (default is $VPN_SUBNET.x)? [y/n] " -e -i 'n' CUSTOM_OCTETS
 	done
 	if [[ $CUSTOM_OCTETS == "y" ]]; then
-		until [[ "$OCTET01" =~ ^[0-9]+$ ]] && ([ "$OCTET01" -eq 10 ] || [ "$OCTET01" -eq 192 ]); do
+		until [[ "$OCTET01" =~ ^[0-9]+$ ]] && { [ "$OCTET01" -eq 10 ] || [ "$OCTET01" -eq 192 ]; }; do
 			read -rp "First octet [10,192]: " -e -i 10 OCTET01
 		done
 		if [[ $OCTET01 -eq 192 ]]; then
-			$OCTET02 = 168
+			OCTET02=168
 		else
-			until [[ "$OCTET02" =~ ^[0-9]+$ ]] && ([ "$OCTET02" -ge 0 ] && [ "$OCTET02" -le 255 ]); do
+			until [[ "$OCTET02" =~ ^[0-9]+$ ]] && { [ "$OCTET02" -ge 0 ] && [ "$OCTET02" -le 255 ]; }; do
 				read -rp "Second octet [0-255]: " -e -i 8 OCTET02
 			done
 		fi
 
-		until [[ "$OCTET03" =~ ^[0-9]+$ ]] && ([ "$OCTET03" -ge 0 ] && [ "$OCTET03" -le 255 ]); do
+		until [[ "$OCTET03" =~ ^[0-9]+$ ]] && { [ "$OCTET03" -ge 0 ] && [ "$OCTET03" -le 255 ]; }; do
 			read -rp "Third octet [0-255]: " -e -i 0 OCTET03
 		done
 		VPN_SUBNET="$OCTET01.$OCTET02.$OCTET03"
 		echo "Using subnet $VPN_SUBNET.0 for further installation"
-	else
-		VPN_SUBNET="$VPN_SUBNET"
 	fi
 	echo ""
 	echo "What protocol do you want OpenVPN to use?"
@@ -784,7 +782,7 @@ ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
 		done
 		;;
 	2)
-		echo 'push "dhcp-option DNS $VPN_SUBNET.1"' >>/etc/openvpn/server.conf
+		echo "push \"dhcp-option DNS $VPN_SUBNET.1\"" >>/etc/openvpn/server.conf
 		;;
 	3) # Cloudflare
 		echo 'push "dhcp-option DNS 1.0.0.1"' >>/etc/openvpn/server.conf
