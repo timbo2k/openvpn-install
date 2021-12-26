@@ -104,8 +104,8 @@ function installUnbound() {
 			apt-get install -y unbound
 
 			# Configuration
-			echo "interface: 10.8.0.1
-access-control: 10.8.0.1/24 allow
+			echo "interface: $VPN_SUBNET.1
+access-control: $VPN_SUBNET.1/24 allow
 hide-identity: yes
 hide-version: yes
 use-caps-for-id: yes
@@ -115,8 +115,8 @@ prefetch: yes" >>/etc/unbound/unbound.conf
 			yum install -y unbound
 
 			# Configuration
-			sed -i "s|# interface: 0.0.0.0$|interface: 10.8.0.1|" /etc/unbound/unbound.conf
-			sed -i "s|# access-control: 127.0.0.0/8 allow|access-control: 10.8.0.1/24 allow|" /etc/unbound/unbound.conf
+			sed -i "s|# interface: 0.0.0.0$|interface: $VPN_SUBNET.1|" /etc/unbound/unbound.conf
+			sed -i "s|# access-control: 127.0.0.0/8 allow|access-control: $VPN_SUBNET.1/24 allow|" /etc/unbound/unbound.conf
 			sed -i "s|# hide-identity: no|hide-identity: yes|" /etc/unbound/unbound.conf
 			sed -i "s|# hide-version: no|hide-version: yes|" /etc/unbound/unbound.conf
 			sed -i "s|use-caps-for-id: no|use-caps-for-id: yes|" /etc/unbound/unbound.conf
@@ -125,8 +125,8 @@ prefetch: yes" >>/etc/unbound/unbound.conf
 			dnf install -y unbound
 
 			# Configuration
-			sed -i "s|# interface: 0.0.0.0$|interface: 10.8.0.1|" /etc/unbound/unbound.conf
-			sed -i "s|# access-control: 127.0.0.0/8 allow|access-control: 10.8.0.1/24 allow|" /etc/unbound/unbound.conf
+			sed -i "s|# interface: 0.0.0.0$|interface: $VPN_SUBNET.1|" /etc/unbound/unbound.conf
+			sed -i "s|# access-control: 127.0.0.0/8 allow|access-control: $VPN_SUBNET.1/24 allow|" /etc/unbound/unbound.conf
 			sed -i "s|# hide-identity: no|hide-identity: yes|" /etc/unbound/unbound.conf
 			sed -i "s|# hide-version: no|hide-version: yes|" /etc/unbound/unbound.conf
 			sed -i "s|# use-caps-for-id: no|use-caps-for-id: yes|" /etc/unbound/unbound.conf
@@ -142,12 +142,12 @@ prefetch: yes" >>/etc/unbound/unbound.conf
 			echo "server:
 	use-syslog: yes
 	do-daemonize: no
-	username: 'unbound'
-	directory: '/etc/unbound'
+	username: \"unbound\"
+	directory: \"/etc/unbound\"
 	trust-anchor-file: trusted-key.key
 	root-hints: root.hints
-	interface: 10.8.0.1
-	access-control: 10.8.0.1/24 allow
+	interface: $VPN_SUBNET.1
+	access-control: $VPN_SUBNET.1/24 allow
 	port: 53
 	num-threads: 2
 	use-caps-for-id: yes
@@ -170,12 +170,12 @@ private-address: 127.0.0.0/8
 private-address: ::ffff:0:0/96" >>/etc/unbound/unbound.conf
 		fi
 	else # Unbound is already installed
-		echo "include: /etc/unbound/openvpn.conf" >>/etc/unbound/unbound.conf
+		echo 'include: /etc/unbound/openvpn.conf' >>/etc/unbound/unbound.conf
 
-		# Add Unbound "server" for the OpenVPN subnet
+		# Add Unbound 'server' for the OpenVPN subnet
 		echo "server:
-interface: 10.8.0.1
-access-control: 10.8.0.1/24 allow
+interface: $VPN_SUBNET.1
+access-control: $VPN_SUBNET.1/24 allow
 hide-identity: yes
 hide-version: yes
 use-caps-for-id: yes
@@ -266,6 +266,29 @@ function installQuestions() {
 		;;
 	esac
 	echo ""
+	echo "Custom octets: Notice when using custom octets only private networks as from RFC 1918 (https://tools.ietf.org/html/rfc1918) are allowed: (10.x.x.0, 192.168.x.0)."
+	until [[ "$CUSTOM_OCTETS" =~ (y|n) ]]; do
+		read -rp "Do you want to define custom octets for your OpenVPN-Adressing (default is $VPN_SUBNET.x)? [y/n] " -e -i 'n' CUSTOM_OCTETS
+	done
+	if [[ $CUSTOM_OCTETS == "y" ]]; then
+		until [[ "$OCTET01" =~ ^[0-9]+$ ]] && { [ "$OCTET01" -eq 10 ] || [ "$OCTET01" -eq 192 ]; }; do
+			read -rp "First octet [10,192]: " -e -i 10 OCTET01
+		done
+		if [[ $OCTET01 -eq 192 ]]; then
+			OCTET02=168
+		else
+			until [[ "$OCTET02" =~ ^[0-9]+$ ]] && { [ "$OCTET02" -ge 0 ] && [ "$OCTET02" -le 255 ]; }; do
+				read -rp "Second octet [0-255]: " -e -i 8 OCTET02
+			done
+		fi
+
+		until [[ "$OCTET03" =~ ^[0-9]+$ ]] && { [ "$OCTET03" -ge 0 ] && [ "$OCTET03" -le 255 ]; }; do
+			read -rp "Third octet [0-255]: " -e -i 0 OCTET03
+		done
+		VPN_SUBNET="$OCTET01.$OCTET02.$OCTET03"
+		echo "Using subnet $VPN_SUBNET.0 for further installation"
+	fi
+	echo ""
 	echo "What protocol do you want OpenVPN to use?"
 	echo "UDP is faster. Unless it is not available, you shouldn't use TCP."
 	echo "   1) UDP"
@@ -293,9 +316,10 @@ function installQuestions() {
 	echo "   8) OpenDNS (Anycast: worldwide)"
 	echo "   9) Google (Anycast: worldwide)"
 	echo "   10) Yandex Basic (Russia)"
-	echo "   11) AdGuard DNS (Russia)"
-	echo "   12) Custom"
-	until [[ "$DNS" =~ ^[0-9]+$ ]] && [ "$DNS" -ge 1 ] && [ "$DNS" -le 12 ]; do
+	echo "   11) AdGuard DNS (Anycast: worldwide)"
+	echo "   12) NextDNS (Anycast: worldwide)"
+	echo "   13) Custom"
+	until [[ "$DNS" =~ ^[0-9]+$ ]] && [ "$DNS" -ge 1 ] && [ "$DNS" -le 13 ]; do
 		read -rp "DNS [1-12]: " -e -i 3 DNS
 		if [[ $DNS == 2 ]] && [[ -e /etc/unbound/unbound.conf ]]; then
 			echo ""
@@ -313,7 +337,7 @@ function installQuestions() {
 				unset DNS
 				unset CONTINUE
 			fi
-		elif [[ $DNS == "12" ]]; then
+		elif [[ $DNS == "13" ]]; then
 			until [[ "$DNS1" =~ ^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$ ]]; do
 				read -rp "Primary DNS: " -e DNS1
 			done
@@ -605,6 +629,22 @@ function installOpenVPN() {
 
 	# Get the "public" interface from the default route
 	NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
+	if [[ -z "$NIC" ]] && [[ "$IPV6_SUPPORT" == 'y' ]]; then
+		NIC=$(ip -6 route show default | sed -ne 's/^default .* dev \([^ ]*\) .*$/\1/p')
+	fi
+
+	# $NIC can not be empty for script rm-openvpn-rules.sh
+	if [[ -z "$NIC" ]]; then
+		echo
+		echo "Can not detect public interface."
+		echo "This needs for setup MASQUERADE."
+		until [[ $CONTINUE =~ (y|n) ]]; do
+			read -rp "Continue? [y/n]: " -e CONTINUE
+		done
+		if [[ "$CONTINUE" == "n" ]]; then
+			exit 1
+		fi
+	fi
 
 	if [[ "$OS" =~ (debian|ubuntu) ]]; then
 		apt-get update
@@ -624,7 +664,7 @@ function installOpenVPN() {
 		apt-get install -y openvpn iptables openssl wget ca-certificates curl
 	elif [[ "$OS" == 'centos' ]]; then
 		yum install -y epel-release
-		yum install -y openvpn iptables openssl wget ca-certificates curl tar
+		yum install -y openvpn iptables openssl wget ca-certificates curl tar 'policycoreutils-python*'
 	elif [[ "$OS" == 'amzn' ]]; then
 		amazon-linux-extras install -y epel
 		yum install -y openvpn iptables openssl wget ca-certificates curl
@@ -723,12 +763,12 @@ persist-key
 persist-tun
 keepalive 10 120
 topology subnet
-server 10.8.0.0 255.255.255.0
+server $VPN_SUBNET.0 255.255.255.0
 ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
 
 	# DNS resolvers
 	case $DNS in
-	1)
+	1) # Current system resolvers
 		# Locate the proper resolv.conf
 		# Needed for systems running systemd-resolved
 		if grep -q "127.0.0.53" "/etc/resolv.conf"; then
@@ -742,7 +782,7 @@ ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
 		done
 		;;
 	2)
-		echo 'push "dhcp-option DNS 10.8.0.1"' >>/etc/openvpn/server.conf
+		echo "push \"dhcp-option DNS $VPN_SUBNET.1\"" >>/etc/openvpn/server.conf
 		;;
 	3) # Cloudflare
 		echo 'push "dhcp-option DNS 1.0.0.1"' >>/etc/openvpn/server.conf
@@ -780,7 +820,11 @@ ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 176.103.130.130"' >>/etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 176.103.130.131"' >>/etc/openvpn/server.conf
 		;;
-	12) # Custom DNS
+	12) # NextDNS
+		echo 'push "dhcp-option DNS 45.90.28.167"' >>/etc/openvpn/server.conf
+		echo 'push "dhcp-option DNS 45.90.30.167"' >>/etc/openvpn/server.conf
+		;;
+	13) # Custom DNS
 		echo "push \"dhcp-option DNS $DNS1\"" >>/etc/openvpn/server.conf
 		if [[ "$DNS2" != "" ]]; then
 			echo "push \"dhcp-option DNS $DNS2\"" >>/etc/openvpn/server.conf
@@ -866,8 +910,8 @@ verb 3" >>/etc/openvpn/server.conf
 		fi
 
 		systemctl daemon-reload
-		systemctl restart openvpn-server@server
 		systemctl enable openvpn-server@server
+		systemctl restart openvpn-server@server
 	elif [[ "$OS" == "ubuntu" ]] && [[ "$VERSION_ID" == "16.04" ]]; then
 		# On Ubuntu 16.04, we use the package from the OpenVPN repo
 		# This package uses a sysvinit service
@@ -883,8 +927,8 @@ verb 3" >>/etc/openvpn/server.conf
 		sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn\@.service
 
 		systemctl daemon-reload
-		systemctl restart openvpn@server
 		systemctl enable openvpn@server
+		systemctl restart openvpn@server
 	fi
 
 	if [[ $DNS == 2 ]]; then
@@ -892,11 +936,11 @@ verb 3" >>/etc/openvpn/server.conf
 	fi
 
 	# Add iptables rules in two scripts
-	mkdir /etc/iptables
+	mkdir -p /etc/iptables
 
 	# Script to add rules
 	echo "#!/bin/sh
-iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
+iptables -t nat -I POSTROUTING 1 -s $VPN_SUBNET.0/24 -o $NIC -j MASQUERADE
 iptables -I INPUT 1 -i tun0 -j ACCEPT
 iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
 iptables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
@@ -911,7 +955,7 @@ ip6tables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-ru
 
 	# Script to remove rules
 	echo "#!/bin/sh
-iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
+iptables -t nat -D POSTROUTING -s $VPN_SUBNET.0/24 -o $NIC -j MASQUERADE
 iptables -D INPUT -i tun0 -j ACCEPT
 iptables -D FORWARD -i $NIC -o tun0 -j ACCEPT
 iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT
@@ -956,6 +1000,7 @@ WantedBy=multi-user.target" >/etc/systemd/system/iptables-openvpn.service
 	echo "client" >/etc/openvpn/client-template.txt
 	if [[ "$PROTOCOL" == 'udp' ]]; then
 		echo "proto udp" >>/etc/openvpn/client-template.txt
+		echo "explicit-exit-notify" >>/etc/openvpn/client-template.txt
 	elif [[ "$PROTOCOL" == 'tcp' ]]; then
 		echo "proto tcp-client" >>/etc/openvpn/client-template.txt
 	fi
