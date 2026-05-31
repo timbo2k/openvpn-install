@@ -492,6 +492,9 @@ readonly TLS13_OPTIONS=("all" "aes-256-only" "aes-128-only" "chacha20-only")
 # TLS groups options
 readonly TLS_GROUPS_OPTIONS=("all" "x25519-only" "nist-only")
 
+# Restricted clients tracking file
+readonly RESTRICTED_CLIENTS_FILE="/etc/openvpn/server/restricted-clients"
+
 # =============================================================================
 # Set Installation Defaults
 # =============================================================================
@@ -3388,6 +3391,19 @@ verb 3"
 }
 
 # Helper function to get the home directory for storing client configs
+function getDefaultNIC() {
+	ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1
+}
+
+# Returns the three-octet VPN subnet prefix (e.g. "10.8.0") by reading server.conf
+# when VPN_SUBNET_IPV4 is not already set in the environment.
+function getVpnSubnetPrefix() {
+	if [[ -z $VPN_SUBNET_IPV4 ]]; then
+		VPN_SUBNET_IPV4=$(grep '^server ' /etc/openvpn/server/server.conf | cut -d ' ' -f 2)
+	fi
+	echo "${VPN_SUBNET_IPV4%.*}"
+}
+
 function getHomeDir() {
 	local client="$1"
 	if [ -d "/home/${client}" ]; then
@@ -3966,6 +3982,43 @@ function newClient() {
 		done
 	fi
 
+	# Restricted client: subnet-only access, no internet, no server access
+	if ! [[ $RESTRICTED_CLIENT =~ ^[yn]$ ]]; then
+		log_menu ""
+		log_prompt "Should this client be restricted to the VPN subnet only?"
+		log_prompt "(Blocks internet access and direct access to the VPN server)"
+		until [[ $RESTRICTED_CLIENT =~ ^[yn]$ ]]; do
+			read -rp "Restricted client (subnet-only)? [y/n]: " -e -i n RESTRICTED_CLIENT
+		done
+	fi
+
+	local RESTRICTED_CLIENT_IP=""
+	if [[ $RESTRICTED_CLIENT == "y" ]]; then
+		local vpn_prefix
+		vpn_prefix=$(getVpnSubnetPrefix)
+		log_menu ""
+		log_prompt "Assign a fixed IP to this client within $vpn_prefix.0/24 (last octet, 2-254)."
+
+		# Suggest the next free octet starting from 80
+		local suggested=80
+		if [[ -f $RESTRICTED_CLIENTS_FILE ]]; then
+			while grep -q " ${vpn_prefix}\.${suggested}$" "$RESTRICTED_CLIENTS_FILE" 2>/dev/null; do
+				((suggested++))
+			done
+		fi
+
+		local last_octet=""
+		until [[ $last_octet =~ ^[0-9]+$ ]] && [[ $last_octet -ge 2 ]] && [[ $last_octet -le 254 ]]; do
+			read -rp "Last octet [2-254]: " -e -i "$suggested" last_octet
+		done
+		RESTRICTED_CLIENT_IP="${vpn_prefix}.${last_octet}"
+
+		if [[ -f $RESTRICTED_CLIENTS_FILE ]] && grep -q " ${RESTRICTED_CLIENT_IP}$" "$RESTRICTED_CLIENTS_FILE"; then
+			log_error "IP $RESTRICTED_CLIENT_IP is already assigned to another restricted client."
+			exit 1
+		fi
+	fi
+
 	cd /etc/openvpn/server/easy-rsa/ || return
 
 	# Read auth mode
@@ -4063,6 +4116,45 @@ $CLIENT_FINGERPRINT
 
 	log_success "Client $CLIENT added and is valid for $CLIENT_CERT_DURATION_DAYS days."
 
+	# Apply restricted-client configuration: CCD file + iptables rules
+	if [[ $RESTRICTED_CLIENT == "y" ]]; then
+		local vpn_prefix="${RESTRICTED_CLIENT_IP%.*}"
+		local server_ip="${vpn_prefix}.1"
+		local nic
+		nic=$(getDefaultNIC)
+
+		# CCD file: pin IP, suppress redirect-gateway, push only the VPN subnet route
+		mkdir -p /etc/openvpn/server/ccd
+		printf 'ifconfig-push %s 255.255.255.0\npush-reset\npush "route %s.0 255.255.255.0"\n' \
+			"$RESTRICTED_CLIENT_IP" "$vpn_prefix" \
+			>"/etc/openvpn/server/ccd/$CLIENT"
+		log_info "CCD file written for $CLIENT ($RESTRICTED_CLIENT_IP)."
+
+		# Record in tracking file for cleanup at revoke time
+		echo "$CLIENT $RESTRICTED_CLIENT_IP" >>"$RESTRICTED_CLIENTS_FILE"
+
+		# Apply iptables rules immediately.
+		# Rule 1: block restricted client from forwarding to the external NIC (internet/LAN).
+		#         Inserted at position 1 so it fires before the broad VPN-subnet ACCEPT.
+		# Rule 2: block restricted client from reaching the server's own VPN IP via INPUT.
+		iptables -I FORWARD 1 -s "$RESTRICTED_CLIENT_IP" -o "$nic" -j DROP
+		iptables -I INPUT 1 -i tun+ -s "$RESTRICTED_CLIENT_IP" -d "$server_ip" -j DROP
+
+		# Persist rules in the iptables boot scripts (iptables backend only)
+		if [[ -f /etc/iptables/add-openvpn-rules.sh ]]; then
+			printf '# restricted-client: %s\niptables -I FORWARD 1 -s %s -o %s -j DROP\niptables -I INPUT 1 -i tun+ -s %s -d %s -j DROP\n' \
+				"$CLIENT" "$RESTRICTED_CLIENT_IP" "$nic" "$RESTRICTED_CLIENT_IP" "$server_ip" \
+				>>/etc/iptables/add-openvpn-rules.sh
+		fi
+		if [[ -f /etc/iptables/rm-openvpn-rules.sh ]]; then
+			printf '# restricted-client: %s\niptables -D FORWARD -s %s -o %s -j DROP\niptables -D INPUT -i tun+ -s %s -d %s -j DROP\n' \
+				"$CLIENT" "$RESTRICTED_CLIENT_IP" "$nic" "$RESTRICTED_CLIENT_IP" "$server_ip" \
+				>>/etc/iptables/rm-openvpn-rules.sh
+		fi
+
+		log_success "Restricted rules applied: $CLIENT ($RESTRICTED_CLIENT_IP) — subnet access only."
+	fi
+
 	# Write the .ovpn config file with proper path and permissions
 	writeClientConfig "$CLIENT"
 
@@ -4112,6 +4204,37 @@ function revokeClient() {
 
 	# Disconnect the client if currently connected
 	disconnectClient "$CLIENT"
+
+	# Clean up restricted-client configuration if applicable
+	if [[ -f $RESTRICTED_CLIENTS_FILE ]] && grep -q "^$CLIENT " "$RESTRICTED_CLIENTS_FILE"; then
+		local restricted_ip nic
+		restricted_ip=$(grep "^$CLIENT " "$RESTRICTED_CLIENTS_FILE" | awk '{print $2}')
+		local subnet_prefix="${restricted_ip%.*}"
+		local server_ip="${subnet_prefix}.1"
+		nic=$(getDefaultNIC)
+
+		log_info "Removing restricted-client configuration for $CLIENT ($restricted_ip)..."
+
+		# Remove CCD file
+		run_cmd "Removing CCD file" rm -f "/etc/openvpn/server/ccd/$CLIENT"
+
+		# Remove live iptables rules (ignore errors — rules may already be gone after reboot)
+		iptables -D FORWARD -s "$restricted_ip" -o "$nic" -j DROP 2>/dev/null || true
+		iptables -D INPUT -i tun+ -s "$restricted_ip" -d "$server_ip" -j DROP 2>/dev/null || true
+
+		# Remove from iptables boot scripts (3 lines: comment + 2 iptables lines)
+		if [[ -f /etc/iptables/add-openvpn-rules.sh ]]; then
+			sed -i "/^# restricted-client: $CLIENT$/,+2d" /etc/iptables/add-openvpn-rules.sh
+		fi
+		if [[ -f /etc/iptables/rm-openvpn-rules.sh ]]; then
+			sed -i "/^# restricted-client: $CLIENT$/,+2d" /etc/iptables/rm-openvpn-rules.sh
+		fi
+
+		# Remove from tracking file
+		sed -i "/^$CLIENT /d" "$RESTRICTED_CLIENTS_FILE"
+
+		log_success "Restricted-client rules removed for $CLIENT."
+	fi
 
 	log_success "Certificate for client $CLIENT revoked."
 }
