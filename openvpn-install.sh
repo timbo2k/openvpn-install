@@ -20,6 +20,11 @@ readonly EASYRSA_SHA256="c2572990ce91112eef8d1b8e4a3b58790da95b68501785c621f6912
 # Set LOG_FILE="" to disable file logging
 VERBOSE=${VERBOSE:-0}
 LOG_FILE=${LOG_FILE:-openvpn-install.log}
+# Resolve LOG_FILE to an absolute path immediately so that subsequent cd calls
+# inside the script don't silently redirect log writes to a different directory.
+if [[ -n "$LOG_FILE" ]] && [[ "$LOG_FILE" != /* ]]; then
+	LOG_FILE="$(pwd)/$LOG_FILE"
+fi
 OUTPUT_FORMAT=${OUTPUT_FORMAT:-table} # table or json - json suppresses log output
 
 # Color definitions (disabled if not a terminal, unless FORCE_COLOR=1).
@@ -2718,6 +2723,18 @@ function installOpenVPN() {
 	fi
 
 	# Install the latest version of easy-rsa from source, if not already installed.
+	# Also re-initialise if an earlier run left the directory but didn't finish the PKI
+	# (e.g. a failed download, interrupted build-ca, etc.).  Detected by the absence of
+	# the CA cert or the SERVER_NAME_GENERATED marker file.
+	if [[ -d /etc/openvpn/server/easy-rsa/ ]] && \
+	   { [[ ! -f /etc/openvpn/server/easy-rsa/SERVER_NAME_GENERATED ]] || \
+	     [[ ! -f /etc/openvpn/server/easy-rsa/pki/ca.crt ]] || \
+	     [[ ! -f /etc/openvpn/server/easy-rsa/pki/crl.pem ]]; }; then
+		log_warn "Easy-RSA directory exists but PKI is incomplete (likely a failed previous install)."
+		log_warn "Removing /etc/openvpn/server/easy-rsa/ and reinitialising..."
+		rm -rf /etc/openvpn/server/easy-rsa/
+	fi
+
 	if [[ ! -d /etc/openvpn/server/easy-rsa/ ]]; then
 		local easy_rsa_archive
 		easy_rsa_archive=$(mktemp /tmp/easy-rsa.XXXXXX.tgz) || log_fatal "Failed to create temporary Easy-RSA archive"
